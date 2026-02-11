@@ -10,6 +10,7 @@ import (
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/lipgloss"
 	"github.com/charmbracelet/log"
 	"github.com/charmbracelet/ssh"
 	"github.com/charmbracelet/wish"
@@ -21,12 +22,27 @@ const (
 	port = "2222"
 )
 
-type model struct{}
+const asciiArt = `
+ _   _      _ _        __        __         _     _
+| | | | ___| | | ___   \ \      / /__  _ __| | __| |
+| |_| |/ _ \ | |/ _ \   \ \ /\ / / _ \| '__| |/ _` + "`" + ` |
+|  _  |  __/ | | (_) |   \ V  V / (_) | |  | | (_| |
+|_| |_|\___|_|_|\___/     \_/\_/ \___/|_|  |_|\__,_|
+`
+
+type model struct {
+	width  int
+	height int
+}
 
 func (m model) Init() tea.Cmd { return nil }
 
 func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
+	case tea.WindowSizeMsg:
+		m.width = msg.Width
+		m.height = msg.Height
+		return m, nil
 	case tea.KeyMsg:
 		switch msg.String() {
 		case "ctrl+c", "q", "enter":
@@ -37,16 +53,48 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 }
 
 func (m model) View() string {
-	return "Hello World\n\nPressione Enter (ou q) para sair.\n"
+	if m.width == 0 || m.height == 0 {
+		return "Carregando..."
+	}
+
+	asciiStyle := lipgloss.NewStyle().
+		Bold(true).
+		Foreground(lipgloss.Color("#45b563"))
+
+	footerStyle := lipgloss.NewStyle().
+		Faint(true)
+
+	footer := footerStyle.Render("Pressione q ou Enter para sair")
+
+	content := asciiStyle.Render(asciiArt)
+
+	contentHeight := lipgloss.Height(content) + 2
+	topPadding := (m.height - contentHeight) / 2
+	if topPadding < 0 {
+		topPadding = 0
+	}
+
+	layout := lipgloss.NewStyle().
+		Width(m.width).
+		Height(m.height).
+		Align(lipgloss.Center, lipgloss.Top).
+		PaddingTop(topPadding)
+
+	fullContent := content + "\n\n" + footer
+
+	return layout.Render(fullContent)
 }
 
-// teaHandler retorna um handler que cria uma nova instância do Bubble Tea para cada sessão SSH
 func teaHandler(s ssh.Session) (tea.Model, []tea.ProgramOption) {
-	return model{}, []tea.ProgramOption{tea.WithAltScreen()}
+	pty, _, _ := s.Pty()
+	m := model{
+		width:  pty.Window.Width,
+		height: pty.Window.Height,
+	}
+	return m, []tea.ProgramOption{tea.WithAltScreen()}
 }
 
 func main() {
-	// Cria o servidor SSH com o middleware do Bubble Tea
 	s, err := wish.NewServer(
 		wish.WithAddress(net.JoinHostPort(host, port)),
 		wish.WithHostKeyPath(".ssh/id_ed25519"),
@@ -59,11 +107,9 @@ func main() {
 		os.Exit(1)
 	}
 
-	// Canal para capturar sinais de encerramento
 	done := make(chan os.Signal, 1)
 	signal.Notify(done, os.Interrupt, syscall.SIGINT, syscall.SIGTERM)
 
-	// Inicia o servidor em uma goroutine
 	log.Info("Servidor SSH iniciado", "host", host, "port", port)
 	go func() {
 		if err := s.ListenAndServe(); err != nil && !errors.Is(err, ssh.ErrServerClosed) {
@@ -72,11 +118,9 @@ func main() {
 		}
 	}()
 
-	// Aguarda sinal de encerramento
 	<-done
 	log.Info("Encerrando servidor...")
 
-	// Graceful shutdown com timeout de 30 segundos
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 
