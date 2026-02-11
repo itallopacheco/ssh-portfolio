@@ -1,0 +1,5 @@
+# Chaves SSH do servidor
+.ssh/
+
+# Binário compilado
+ssh-portfolio
