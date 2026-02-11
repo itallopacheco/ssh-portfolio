@@ -27,6 +27,7 @@ jobs:
           host: ${{ secrets.VPS_HOST }}
           username: ${{ secrets.VPS_USER }}
           key: ${{ secrets.VPS_SSH_KEY }}
+          port: 2222
           source: ssh-portfolio
           target: /home/ubuntu/
 
@@ -36,4 +37,5 @@ jobs:
           host: ${{ secrets.VPS_HOST }}
           username: ${{ secrets.VPS_USER }}
           key: ${{ secrets.VPS_SSH_KEY }}
+          port: 2222
           script: sudo systemctl restart ssh-portfolio
