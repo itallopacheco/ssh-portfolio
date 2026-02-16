@@ -7,11 +7,14 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"net/url"
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/charmbracelet/log"
 )
 
 // Client é o cliente HTTP para a Spotify Web API.
@@ -100,12 +103,16 @@ func NewClient(clientID, clientSecret, refreshToken string) *Client {
 // Endpoint: GET /v1/me/player/currently-playing
 // Scope necessário: user-read-currently-playing
 func (c *Client) GetCurrentlyPlaying() (*Track, error) {
+	log.Debug("Fetching currently playing track")
+
 	if err := c.ensureValidToken(); err != nil {
+		log.Error("Failed to get valid token", "error", err)
 		return nil, fmt.Errorf("failed to get valid token: %w", err)
 	}
 
 	req, err := http.NewRequest("GET", "https://api.spotify.com/v1/me/player/currently-playing", nil)
 	if err != nil {
+		log.Error("Failed to create request", "error", err)
 		return nil, err
 	}
 
@@ -113,26 +120,35 @@ func (c *Client) GetCurrentlyPlaying() (*Track, error) {
 	req.Header.Set("Authorization", "Bearer "+c.accessToken)
 	c.mu.RUnlock()
 
+	log.Debug("Sending request to Spotify API", "url", req.URL.String())
 	resp, err := c.httpClient.Do(req)
 	if err != nil {
+		log.Error("Request failed", "error", err)
 		return nil, err
 	}
 	defer resp.Body.Close()
 
+	log.Debug("Received response", "status", resp.StatusCode)
+
 	if resp.StatusCode == http.StatusNoContent {
+		log.Debug("No content - nothing playing")
 		return nil, nil
 	}
 
 	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		log.Error("Spotify API error", "status", resp.StatusCode, "body", string(body))
 		return nil, fmt.Errorf("spotify API error: %d", resp.StatusCode)
 	}
 
 	var data currentlyPlayingResponse
 	if err := json.NewDecoder(resp.Body).Decode(&data); err != nil {
+		log.Error("Failed to decode response", "error", err)
 		return nil, err
 	}
 
 	if data.Item == nil {
+		log.Debug("No item in response")
 		return nil, nil
 	}
 
@@ -150,6 +166,7 @@ func (c *Client) GetCurrentlyPlaying() (*Track, error) {
 		track.ArtworkURL = data.Item.Album.Images[0].URL
 	}
 
+	log.Info("Got currently playing", "track", track.Name, "artist", track.Artist, "playing", track.IsPlaying)
 	return track, nil
 }
 
@@ -159,12 +176,16 @@ func (c *Client) GetCurrentlyPlaying() (*Track, error) {
 // Endpoint: GET /v1/me/player/recently-played?limit=1
 // Scope necessário: user-read-recently-played
 func (c *Client) GetRecentlyPlayed() (*Track, error) {
+	log.Debug("Fetching recently played track")
+
 	if err := c.ensureValidToken(); err != nil {
+		log.Error("Failed to get valid token", "error", err)
 		return nil, fmt.Errorf("failed to get valid token: %w", err)
 	}
 
 	req, err := http.NewRequest("GET", "https://api.spotify.com/v1/me/player/recently-played?limit=1", nil)
 	if err != nil {
+		log.Error("Failed to create request", "error", err)
 		return nil, err
 	}
 
@@ -172,22 +193,30 @@ func (c *Client) GetRecentlyPlayed() (*Track, error) {
 	req.Header.Set("Authorization", "Bearer "+c.accessToken)
 	c.mu.RUnlock()
 
+	log.Debug("Sending request to Spotify API", "url", req.URL.String())
 	resp, err := c.httpClient.Do(req)
 	if err != nil {
+		log.Error("Request failed", "error", err)
 		return nil, err
 	}
 	defer resp.Body.Close()
 
+	log.Debug("Received response", "status", resp.StatusCode)
+
 	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		log.Error("Spotify API error", "status", resp.StatusCode, "body", string(body))
 		return nil, fmt.Errorf("spotify API error: %d", resp.StatusCode)
 	}
 
 	var data recentlyPlayedResponse
 	if err := json.NewDecoder(resp.Body).Decode(&data); err != nil {
+		log.Error("Failed to decode response", "error", err)
 		return nil, err
 	}
 
 	if len(data.Items) == 0 {
+		log.Debug("No items in recently played")
 		return nil, nil
 	}
 
@@ -206,6 +235,7 @@ func (c *Client) GetRecentlyPlayed() (*Track, error) {
 		track.ArtworkURL = item.Album.Images[0].URL
 	}
 
+	log.Info("Got recently played", "track", track.Name, "artist", track.Artist)
 	return track, nil
 }
 
@@ -231,12 +261,15 @@ func (c *Client) ensureValidToken() error {
 //
 // O access token dura ~1 hora. Renovamos 60s antes de expirar.
 func (c *Client) refreshAccessToken() error {
+	log.Debug("Refreshing access token")
+
 	data := url.Values{}
 	data.Set("grant_type", "refresh_token")
 	data.Set("refresh_token", c.refreshToken)
 
 	req, err := http.NewRequest("POST", "https://accounts.spotify.com/api/token", strings.NewReader(data.Encode()))
 	if err != nil {
+		log.Error("Failed to create token request", "error", err)
 		return err
 	}
 
@@ -246,16 +279,20 @@ func (c *Client) refreshAccessToken() error {
 
 	resp, err := c.httpClient.Do(req)
 	if err != nil {
+		log.Error("Token request failed", "error", err)
 		return err
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		log.Error("Failed to refresh token", "status", resp.StatusCode, "body", string(body))
 		return fmt.Errorf("failed to refresh token: %d", resp.StatusCode)
 	}
 
 	var tokenResp tokenResponse
 	if err := json.NewDecoder(resp.Body).Decode(&tokenResp); err != nil {
+		log.Error("Failed to decode token response", "error", err)
 		return err
 	}
 
@@ -264,5 +301,6 @@ func (c *Client) refreshAccessToken() error {
 	c.tokenExpiry = time.Now().Add(time.Duration(tokenResp.ExpiresIn-60) * time.Second)
 	c.mu.Unlock()
 
+	log.Info("Access token refreshed", "expires_in", tokenResp.ExpiresIn)
 	return nil
 }
