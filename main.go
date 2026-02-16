@@ -179,7 +179,7 @@ func (m model) renderSpotifyWidget() string {
 		return emptyWidgetStyle.Render(content)
 	}
 
-	art, _ := albumart.RenderFromURL(m.currentTrack.ArtworkURL, 16, 8)
+	art, _ := albumart.RenderFromURL(m.currentTrack.ArtworkURL, 32, 16)
 
 	artFrame := lipgloss.NewStyle().
 		Border(lipgloss.RoundedBorder()).
